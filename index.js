@@ -1,87 +1,132 @@
-import TelegramBot from "node-telegram-bot-api";
-import admin from "firebase-admin";
-import fs from "fs";
+const TelegramBot = require("node-telegram-bot-api");
+const fs = require("fs");
 
-// Load Firebase Admin SDK (from Render Secret File)
-const serviceAccount = JSON.parse(
-  fs.readFileSync("/etc/secrets/firebase.json", "utf8")
-);
+const token = process.env.BOT_TOKEN;
+const bot = new TelegramBot(token, { polling: true });
 
-// Init Firebase
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+// READ firebase.json SECRET FILE
+const firebaseFile = "/etc/secrets/firebase.json";
+let firebaseData = {};
 
-const db = admin.firestore();
+if (fs.existsSync(firebaseFile)) {
+  firebaseData = JSON.parse(fs.readFileSync(firebaseFile, "utf8"));
+}
 
-// Bot token loaded from Render ENV variable
-const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
-
-// Button Menu
+// ---------------------------
+// MAIN MENU BUTTONS
+// ---------------------------
 const mainMenu = {
   reply_markup: {
     keyboard: [
-      ["💰 Check Balance"],
-      ["📤 Redeem Code"],
-      ["📥 Daily Points"],
-      ["📞 Support"],
-      ["🔗 Link Account"],
-      ["💳 Current Balance"]
+      [
+        { text: "💰 Check Balance" },
+        { text: "🔗 Link Account" }
+      ],
+      [
+        { text: "🎁 Redeem Code" },
+        { text: "💸 Transfer Balance" }
+      ],
+      [
+        { text: "📆 Daily Points" },
+        { text: "📞 Support" }
+      ]
     ],
     resize_keyboard: true
   }
 };
 
-// START Command
-bot.onText(/\/start/, async (msg) => {
-  const chatId = msg.chat.id;
-  const name = msg.from.first_name || "User";
-
-  await bot.sendMessage(
-    chatId,
-    `Hey ${name}, welcome to Earning Master Official Bot!\n\nHere you can earn money using Redeem Codes & Daily Points 😊`,
+// ---------------------------
+// START COMMAND
+// ---------------------------
+bot.onText(/\/start/, msg => {
+  bot.sendMessage(
+    msg.chat.id,
+    "👋 Welcome to *Earning Master Bot*!\nChoose an option:",
     mainMenu
   );
 });
 
-// Handle Button Press
-bot.on("message", async (msg) => {
+// ---------------------------
+// CHECK IF USER IS LINKED
+// (fake for now = always false)
+// ---------------------------
+function isUserLinked(userId) {
+  return false; // (test mode) always false
+}
+
+// ---------------------------
+// HANDLERS
+// ---------------------------
+
+// 💰 CHECK BALANCE
+bot.on("message", msg => {
+  const text = msg.text;
   const chatId = msg.chat.id;
-  const txt = msg.text;
 
-  // Ignore /start (already handled)
-  if (txt === "/start") return;
+  if (text === "💰 Check Balance") {
+    if (!isUserLinked(chatId)) {
+      return bot.sendMessage(
+        chatId,
+        "⚠️ Please link your Earning Master account first.\nClick on *Link Account* to continue.",
+        mainMenu
+      );
+    }
 
-  // If user types manually → block
-  const buttons = [
-    "💰 Check Balance",
-    "📤 Redeem Code",
-    "📥 Daily Points",
-    "📞 Support",
-    "🔗 Link Account",
-    "💳 Current Balance"
-  ];
-
-  if (!buttons.includes(txt)) {
-    return bot.sendMessage(
-      chatId,
-      "⚠️ Please use the buttons to communicate with the bot."
-    );
+    bot.sendMessage(chatId, "Your balance is: ₹0.00 (test mode)");
   }
 
-  // ✨ Every button requires linking first (as you requested)
-  if (txt !== "🔗 Link Account") {
-    return bot.sendMessage(
-      chatId,
-      "⚠️ Please link your Earning Master app account with this bot first.\n\nClick on **Link Account** to continue."
-    );
-  }
-
-  // 🔗 Link Account button
-  if (txt === "🔗 Link Account") {
-    return bot.sendMessage(
+  // 🔗 LINK ACCOUNT
+  if (text === "🔗 Link Account") {
+    bot.sendMessage(
       chatId,
       "🔗 To link your account, please enter the OTP shown inside the Earning Master App.\n\n(Currently test mode)"
+    );
+  }
+
+  // 🎁 REDEEM CODE
+  if (text === "🎁 Redeem Code") {
+    if (!isUserLinked(chatId)) {
+      return bot.sendMessage(
+        chatId,
+        "⚠️ Please link your Earning Master account first.\nClick on *Link Account* to continue.",
+        mainMenu
+      );
+    }
+
+    bot.sendMessage(chatId, "Send your redeem code:");
+  }
+
+  // 💸 TRANSFER BALANCE
+  if (text === "💸 Transfer Balance") {
+    if (!isUserLinked(chatId)) {
+      return bot.sendMessage(
+        chatId,
+        "⚠️ Please link your Earning Master account first.\nClick on *Link Account* to continue.",
+        mainMenu
+      );
+    }
+
+    bot.sendMessage(chatId, "Enter amount to transfer:");
+  }
+
+  // 📆 DAILY POINTS
+  if (text === "📆 Daily Points") {
+    if (!isUserLinked(chatId)) {
+      return bot.sendMessage(
+        chatId,
+        "⚠️ Please link your Earning Master account first.\nClick on *Link Account* to continue.",
+        mainMenu
+      );
+    }
+
+    bot.sendMessage(chatId, "You received +1 daily point! (test)");
+  }
+
+  // 📞 SUPPORT
+  if (text === "📞 Support") {
+    bot.sendMessage(
+      chatId,
+      "📞 Support:\nEmail: support@earningmaster.com\nTelegram: @YourSupportID"
     );
   }
 });
