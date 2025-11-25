@@ -1,13 +1,17 @@
 {
   "name": "earning-master-bot",
   "version": "1.0.0",
+  "description": "Telegram bot for Earning Master",
   "main": "index.js",
-  "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
-    "telegraf": "^4.12.2",
-    "firebase-admin": "^11.10.0"
+    "dotenv": "^16.0.0",
+    "firebase-admin": "^11.0.0",
+    "node-telegram-bot-api": "^0.61.0"
   }
 }
