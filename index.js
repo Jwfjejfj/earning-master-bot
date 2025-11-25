@@ -1,192 +1,144 @@
 import TelegramBot from "node-telegram-bot-api";
 import admin from "firebase-admin";
-import fs from "fs";
 
-// =========================
-//  LOAD BOT TOKEN FROM RENDER
-// =========================
-const BOT_TOKEN = process.env.BOT_TOKEN;
+// ============================
+//  FIREBASE SETUP
+// ============================
 
-if (!BOT_TOKEN) {
-  console.log("❌ BOT_TOKEN missing!");
-  process.exit(1);
-}
-
-// =========================
-//  LOAD FIREBASE SERVICE ACCOUNT
-// =========================
-const serviceAccount = JSON.parse(
-  fs.readFileSync("/etc/secrets/firebase.json", "utf8")
-);
+const serviceAccount = JSON.parse(process.env.FIREBASE_JSON);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
-  databaseURL: "https://earningmaster-default-rtdb.firebaseio.com/"
+  databaseURL: process.env.FIREBASE_DB_URL
 });
 
 const db = admin.database();
 
-// =========================
-//  START TELEGRAM BOT
-// =========================
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+// ============================
+//  BOT INIT
+// ============================
 
-// =========================
-//  OTP STORAGE
-// =========================
-const otpStore = {}; 
-// otpStore[userId] = { code, expiresAt }
+const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
+// ============================
+//  HELPER: Generate OTP
+// ============================
 
-// =========================
-//  /start COMMAND
-// =========================
-bot.onText(/\/start/, async (msg) => {
-  const chatId = msg.chat.id;
+function generate6Digit() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+// ============================
+//  START COMMAND
+// ============================
+
+bot.onText(/\/start/, (msg) => {
   const name = msg.from.first_name || "User";
 
-  await bot.sendMessage(
-    chatId,
-    `👋 Hey *${name}*, And Welcome To *Earning Master Official Bot*\n\n` +
-    `Here You Can Easily Earn Money, Get Daily Bonus, And Use Giveaway Redeem Codes 🎁`,
-    { parse_mode: "Markdown" }
-  );
-
-  sendMainMenu(chatId);
-});
-
-// =========================
-//  MAIN MENU INLINE KEYBOARD
-// =========================
-function sendMainMenu(chatId) {
-  bot.sendMessage(chatId, "Choose an option:", {
+  const buttons = {
     reply_markup: {
       keyboard: [
-        [{ text: "💰 Check Balance" }, { text: "🔗 Link Account" }],
-        [{ text: "🎁 Redeem Code" }, { text: "💸 Transfer Balance" }],
-        [{ text: "📅 Daily Points" }, { text: "☎ Support" }]
+        ["Daily Points", "Check Balance", "Redeem Code"],
+        ["Link Account", "Transfer Balance", "Support"]
       ],
       resize_keyboard: true
     }
-  });
-}
+  };
 
-
-// =========================
-//  HANDLE BUTTON CLICKS
-// =========================
-bot.on("message", async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
-
-  if (text === "🔗 Link Account") return handleLinkAccount(chatId);
-  if (text === "💰 Check Balance") return handleCheckBalance(chatId);
+  bot.sendMessage(
+    msg.chat.id,
+    `Hey ${name}, And Welcome To *Earning Master Official Bot* 🎉\n\nHere You Can Easily Earn Money, Get Daily Bonus And Get Giveaway Redeem Codes.`,
+    { parse_mode: "Markdown", ...buttons }
+  );
 });
 
+// ============================
+//  HANDLE ALL BUTTON PRESSES
+// ============================
 
-// =========================
-//  HANDLE LINK ACCOUNT
-// =========================
-async function handleLinkAccount(chatId) {
+bot.on("message", async (msg) => {
+  const txt = msg.text;
+  const chatId = msg.chat.id;
 
-  // Check active code
-  if (otpStore[chatId] && otpStore[chatId].expiresAt > Date.now()) {
-    const remaining = Math.floor((otpStore[chatId].expiresAt - Date.now()) / 1000);
-    return bot.sendMessage(
+  // ignore /start because already handled
+  if (txt.startsWith("/start")) return;
+
+  const firebaseUID = await getUserLinkedUID(msg.from.id);
+
+  // If user not linked:
+  if (!firebaseUID && txt !== "Link Account") {
+    bot.sendMessage(
       chatId,
-      `⚠ You already have an active verification code.\n` +
-      `Please wait *${remaining} seconds* until it expires.`,
+      "🔗 Please *Link Your Earning Master App* With This Bot First.\nClick *Link Account* To Begin.",
       { parse_mode: "Markdown" }
     );
+    return;
   }
 
-  // Generate new OTP
-  const code = Math.floor(100000 + Math.random() * 900000);
-  const expiresAt = Date.now() + 300000; // 300 sec
+  // =================
+  //  LINK ACCOUNT
+  // =================
+  if (txt === "Link Account") {
 
-  otpStore[chatId] = { code, expiresAt };
-
-  bot.sendMessage(
-    chatId,
-    `✅ *Your Verification Code: ${code}*\n\n` +
-    `⏳ Expires in *300 seconds*\n\n` +
-    `⚠ Do NOT share this with anyone.`,
-    { parse_mode: "Markdown" }
-  );
-
-  // countdown updater
-  let secondsLeft = 300;
-  const countdown = setInterval(() => {
-    secondsLeft--;
-    if (secondsLeft <= 0) {
-      delete otpStore[chatId];
-      clearInterval(countdown);
+    // check if already linked
+    if (firebaseUID) {
+      bot.sendMessage(chatId, "Your Telegram Is Already Linked.");
+      return;
     }
-  }, 1000);
-}
 
+    // create 6-digit OTP
+    const code = generate6Digit();
+    const now = Date.now();
+    const expires = now + 300000; // 300 seconds
 
-// =========================
-//  CHECK BALANCE
-// =========================
-async function handleCheckBalance(chatId) {
+    await db.ref("VerificationCodes").child(code).set({
+      tgid: msg.from.id.toString(),
+      expires: expires
+    });
 
-  const linkRef = db.ref("TG_LINKS").child(chatId);
-
-  const snap = await linkRef.once("value");
-
-  if (!snap.exists()) {
-    return bot.sendMessage(
+    bot.sendMessage(
       chatId,
-      `⚠ Please link your Earning Master account first.\nClick on *Link Account* to continue.`,
+      `🔐 *Your Verification Code:*\n*${code}*\n\nDo NOT share it with anyone!\nExpires in *300 seconds*.`,
       { parse_mode: "Markdown" }
     );
+
+    return;
   }
 
-  const uid7 = snap.child("uid7").val();
+  // =================
+  //  BALANCE
+  // =================
+  if (txt === "Check Balance") {
 
-  const userSnap = await db.ref("users").child(uid7).once("value");
+    const appUID = firebaseUID; // already confirmed linked
+    const balSnap = await db.ref("Balances").child(appUID).child("amount").get();
 
-  if (!userSnap.exists())
-    return bot.sendMessage(chatId, "❌ Account not found.");
+    let bal = "0.00";
+    if (balSnap.exists()) bal = balSnap.val();
 
-  const balance = userSnap.child("balance").val() || 0;
+    bot.sendMessage(
+      chatId,
+      `💳 *Your UID:* ${appUID}\n💰 *Balance:* ₹${bal}`,
+      { parse_mode: "Markdown" }
+    );
+    return;
+  }
 
-  bot.sendMessage(
-    chatId,
-    `👤 UID: *${uid7}*\n💰 Account Balance: *₹${balance}*`,
-    { parse_mode: "Markdown" }
-  );
+  // =================
+  //  OTHER BUTTONS
+  // =================
+
+  bot.sendMessage(chatId, "Please Use The Buttons To Communicate.");
+});
+
+// ============================
+//  GET USER LINKED UID
+// ============================
+
+async function getUserLinkedUID(telegramID) {
+  const snap = await db.ref("UserFromTelegram").child(telegramID).get();
+  if (snap.exists()) return snap.val();
+  return null;
 }
 
-
-// =========================
-//  VERIFY OTP FROM APP
-// =========================
-export async function verifyOtpAndLink(uid7, telegramId, enteredCode) {
-
-  if (!otpStore[telegramId])
-    return { success: false, message: "Code expired or not generated." };
-
-  if (otpStore[telegramId].code != enteredCode)
-    return { success: false, message: "Invalid code." };
-
-  if (otpStore[telegramId].expiresAt < Date.now())
-    return { success: false, message: "Expired code." };
-
-  // Save link in Firebase
-  await db.ref("TG_LINKS").child(telegramId).set({
-    uid7: uid7
-  });
-
-  delete otpStore[telegramId];
-
-  // Notify the user
-  bot.sendMessage(
-    telegramId,
-    `🎉 Your Earning Master account *${uid7}* is now linked successfully!`,
-    { parse_mode: "Markdown" }
-  );
-
-  return { success: true };
-}
+console.log("BOT RUNNING 24/7...");

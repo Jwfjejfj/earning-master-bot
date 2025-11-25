@@ -1,13 +1,12 @@
 {
-  "name": "earning-master-bot",
+  "name": "earning-master-tg-bot",
   "version": "1.0.0",
+  "description": "Earning Master Official Telegram Bot",
   "main": "index.js",
   "type": "module",
-  "scripts": {
-    "start": "node index.js"
-  },
   "dependencies": {
-    "firebase-admin": "^11.10.1",
-    "node-telegram-bot-api": "^0.61.0"
+    "axios": "^1.6.2",
+    "node-telegram-bot-api": "^0.61.0",
+    "firebase-admin": "^11.10.1"
   }
 }
