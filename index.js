@@ -1,144 +1,115 @@
-import TelegramBot from "node-telegram-bot-api";
-import admin from "firebase-admin";
+// =========================
+//  EARNING MASTER BOT
+//  FINAL WORKING VERSION
+// =========================
 
-// ============================
-//  FIREBASE SETUP
-// ============================
+const { Telegraf, Markup } = require("telegraf");
+const admin = require("firebase-admin");
 
-const serviceAccount = JSON.parse(process.env.FIREBASE_JSON);
+// Load Firebase Admin from secret file
+const serviceAccount = require("/etc/secrets/firebase.json");
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
-  databaseURL: process.env.FIREBASE_DB_URL
+  databaseURL: "https://earningmaster-default-rtdb.firebaseio.com/"
 });
 
 const db = admin.database();
+const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// ============================
-//  BOT INIT
-// ============================
+// ------------------------------
+//       BUTTON LAYOUT
+// ------------------------------
+const mainMenu = Markup.inlineKeyboard([
+  [
+    Markup.button.callback("💰 Check Balance", "CHECK_BAL"),
+    Markup.button.callback("🔗 Link Account", "LINK_ACC")
+  ],
+  [
+    Markup.button.callback("🎁 Redeem Code", "REDEEM"),
+    Markup.button.callback("💸 Transfer Balance", "TRANSFER")
+  ],
+  [
+    Markup.button.callback("📅 Daily Points", "DAILY"),
+    Markup.button.callback("📞 Support", "SUPPORT")
+  ]
+]);
 
-const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+// ------------------------------
+//         /start COMMAND
+// ------------------------------
+bot.start(async (ctx) => {
+  try {
+    const name = ctx.from.first_name || "User";
 
-// ============================
-//  HELPER: Generate OTP
-// ============================
-
-function generate6Digit() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-// ============================
-//  START COMMAND
-// ============================
-
-bot.onText(/\/start/, (msg) => {
-  const name = msg.from.first_name || "User";
-
-  const buttons = {
-    reply_markup: {
-      keyboard: [
-        ["Daily Points", "Check Balance", "Redeem Code"],
-        ["Link Account", "Transfer Balance", "Support"]
-      ],
-      resize_keyboard: true
-    }
-  };
-
-  bot.sendMessage(
-    msg.chat.id,
-    `Hey ${name}, And Welcome To *Earning Master Official Bot* 🎉\n\nHere You Can Easily Earn Money, Get Daily Bonus And Get Giveaway Redeem Codes.`,
-    { parse_mode: "Markdown", ...buttons }
-  );
-});
-
-// ============================
-//  HANDLE ALL BUTTON PRESSES
-// ============================
-
-bot.on("message", async (msg) => {
-  const txt = msg.text;
-  const chatId = msg.chat.id;
-
-  // ignore /start because already handled
-  if (txt.startsWith("/start")) return;
-
-  const firebaseUID = await getUserLinkedUID(msg.from.id);
-
-  // If user not linked:
-  if (!firebaseUID && txt !== "Link Account") {
-    bot.sendMessage(
-      chatId,
-      "🔗 Please *Link Your Earning Master App* With This Bot First.\nClick *Link Account* To Begin.",
+    await ctx.reply(
+      `👋 Hey **${name}**, And Welcome To *Earning Master Official Bot*\n\n` +
+      `Here You Can Easily Earn Money, Get Daily Bonus And Use Giveaway Redeem Codes 🎁`,
       { parse_mode: "Markdown" }
     );
-    return;
+
+    await ctx.reply("Choose an option:", mainMenu);
+  } catch (e) {
+    console.log("Start Error:", e);
   }
+});
 
-  // =================
-  //  LINK ACCOUNT
-  // =================
-  if (txt === "Link Account") {
+// ------------------------------
+//      LINK ACCOUNT BUTTON
+// ------------------------------
+bot.action("LINK_ACC", async (ctx) => {
+  try {
+    const userID = ctx.from.id.toString();
 
-    // check if already linked
-    if (firebaseUID) {
-      bot.sendMessage(chatId, "Your Telegram Is Already Linked.");
-      return;
+    const otpRef = db.ref("OTP").child(userID);
+    const snap = await otpRef.once("value");
+
+    if (snap.exists()) {
+      return ctx.reply(
+        "⚠️ You already have an active verification code.\nPlease wait until it expires."
+      );
     }
 
-    // create 6-digit OTP
-    const code = generate6Digit();
-    const now = Date.now();
-    const expires = now + 300000; // 300 seconds
+    // Generate 6 digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiry = Date.now() + 300000; // 300 seconds
 
-    await db.ref("VerificationCodes").child(code).set({
-      tgid: msg.from.id.toString(),
-      expires: expires
+    await otpRef.set({
+      otp: otp,
+      expires: expiry
     });
 
-    bot.sendMessage(
-      chatId,
-      `🔐 *Your Verification Code:*\n*${code}*\n\nDo NOT share it with anyone!\nExpires in *300 seconds*.`,
+    return ctx.reply(
+      `✅ *Your Verification Code:* ${otp}\n\n⏳ *Expires in:* 300 seconds\n\n⚠️ Do NOT share this with anyone.`,
       { parse_mode: "Markdown" }
     );
 
-    return;
+  } catch (e) {
+    console.log("LINK_ACC Error:", e);
   }
-
-  // =================
-  //  BALANCE
-  // =================
-  if (txt === "Check Balance") {
-
-    const appUID = firebaseUID; // already confirmed linked
-    const balSnap = await db.ref("Balances").child(appUID).child("amount").get();
-
-    let bal = "0.00";
-    if (balSnap.exists()) bal = balSnap.val();
-
-    bot.sendMessage(
-      chatId,
-      `💳 *Your UID:* ${appUID}\n💰 *Balance:* ₹${bal}`,
-      { parse_mode: "Markdown" }
-    );
-    return;
-  }
-
-  // =================
-  //  OTHER BUTTONS
-  // =================
-
-  bot.sendMessage(chatId, "Please Use The Buttons To Communicate.");
 });
 
-// ============================
-//  GET USER LINKED UID
-// ============================
-
-async function getUserLinkedUID(telegramID) {
-  const snap = await db.ref("UserFromTelegram").child(telegramID).get();
-  if (snap.exists()) return snap.val();
-  return null;
+// ------------------------------
+//   OTHER BUTTONS BEFORE LINKED
+// ------------------------------
+async function requireLink(ctx) {
+  return ctx.reply(
+    "⚠ Please link your Earning Master app account first.\nClick on *Link Account* to continue.",
+    { parse_mode: "Markdown" }
+  );
 }
 
-console.log("BOT RUNNING 24/7...");
+bot.action("CHECK_BAL", requireLink);
+bot.action("REDEEM", requireLink);
+bot.action("TRANSFER", requireLink);
+bot.action("DAILY", requireLink);
+bot.action("SUPPORT", requireLink);
+
+// ------------------------------
+//     START TELEGRAM BOT
+// ------------------------------
+bot.launch();
+
+// Safe exit on Render stop
+process.once("SIGINT", () => bot.stop("SIGINT"));
+process.once("SIGTERM", () => bot.stop("SIGTERM"));
