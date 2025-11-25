@@ -2,12 +2,11 @@
   "name": "earning-master-bot",
   "version": "1.0.0",
   "main": "index.js",
-  "type": "module",
+  "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "node-telegram-bot-api": "^0.61.0",
-    "firebase-admin": "^11.10.1"
+    "node-telegram-bot-api": "^0.61.0"
   }
 }
